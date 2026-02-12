@@ -3,6 +3,18 @@ version: "3.8"
 services:
 
   # =====================
+  # DISCOVERY SERVER
+  # =====================
+
+  discovery-server:
+    build:
+      context: .
+      dockerfile: discovery-server/Dockerfile
+    container_name: discovery-server
+    ports:
+      - "8761:8761"
+
+  # =====================
   # DATABASES
   # =====================
 
@@ -43,39 +55,53 @@ services:
   # =====================
 
   inventory-service:
-    build: ./inventory-service
+    build:
+      context: .
+      dockerfile: inventory-service/Dockerfile
     container_name: inventory-service
     depends_on:
+      - discovery-server
       - mysql-inventory
     ports:
       - "8082:8082"
     environment:
+      SPRING_APPLICATION_NAME: inventory-service
       SPRING_DATASOURCE_URL: jdbc:mysql://mysql-inventory:3306/inventory_service
       SPRING_DATASOURCE_USERNAME: root
       SPRING_DATASOURCE_PASSWORD: mysql
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://discovery-server:8761/eureka
 
   order-service:
-    build: ./order-service
+    build:
+      context: .
+      dockerfile: order-service/Dockerfile
     container_name: order-service
     depends_on:
+      - discovery-server
       - mysql-order
-      - inventory-service
     ports:
       - "8081:8081"
     environment:
+      SPRING_APPLICATION_NAME: order-service
       SPRING_DATASOURCE_URL: jdbc:mysql://mysql-order:3306/order_service
       SPRING_DATASOURCE_USERNAME: root
       SPRING_DATASOURCE_PASSWORD: mysql
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://discovery-server:8761/eureka
 
   product-service:
-    build: ./product-service
+    build:
+      context: .
+      dockerfile: product-service/Dockerfile
     container_name: product-service
     depends_on:
+      - discovery-server
       - mongo
     ports:
       - "8080:8080"
     environment:
+      SPRING_APPLICATION_NAME: product-service
       SPRING_DATA_MONGODB_URI: mongodb://mongo:27017/product-service
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://discovery-server:8761/eureka
 
 # =====================
 # VOLUMES
