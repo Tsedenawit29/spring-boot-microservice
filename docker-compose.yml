@@ -1,11 +1,13 @@
 version: "3.8"
 
 services:
-
+  zipkin:
+    image: openzipkin/zipkin
+    ports:
+      - "9411:9411"
   # =====================
   # DISCOVERY SERVER
   # =====================
-
   discovery-server:
     build:
       context: .
@@ -13,11 +15,22 @@ services:
     container_name: discovery-server
     ports:
       - "8761:8761"
+    restart: unless-stopped
+
+  api-gateway:
+    build: ./api-gateway
+    ports:
+      - "8080:8080"
+    depends_on:
+      - discovery-server
+      - zipkin
+    environment:
+      MANAGEMENT_ZIPKIN_TRACING_ENDPOINT: http://zipkin:9411/api/v2/spans
+      MANAGEMENT_TRACING_SAMPLING_PROBABILITY: "1.0"
 
   # =====================
   # DATABASES
   # =====================
-
   mysql-inventory:
     image: mysql:8.0
     container_name: mysql-inventory
@@ -25,10 +38,16 @@ services:
     environment:
       MYSQL_ROOT_PASSWORD: mysql
       MYSQL_DATABASE: inventory_service
-    ports:
-      - "3308:3306"
+#    ports:
+#      - "3308:3306"
     volumes:
       - mysql_inventory_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-pmysql"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
 
   mysql-order:
     image: mysql:8.0
@@ -37,31 +56,44 @@ services:
     environment:
       MYSQL_ROOT_PASSWORD: mysql
       MYSQL_DATABASE: order_service
-    ports:
-      - "3307:3306"
+#    ports:
+#      - "3307:3306"
     volumes:
       - mysql_order_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-pmysql"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
 
   mongo:
     image: mongo:6.0
     container_name: mongo
-    ports:
-      - "27017:27017"
+#    ports:
+#      - "27017:27017"
     volumes:
       - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
 
   # =====================
   # SERVICES
   # =====================
-
   inventory-service:
     build:
       context: .
       dockerfile: inventory-service/Dockerfile
     container_name: inventory-service
     depends_on:
-      - discovery-server
-      - mysql-inventory
+      discovery-server:
+        condition: service_started
+      mysql-inventory:
+        condition: service_healthy
     ports:
       - "8082:8082"
     environment:
@@ -70,6 +102,8 @@ services:
       SPRING_DATASOURCE_USERNAME: root
       SPRING_DATASOURCE_PASSWORD: mysql
       EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://discovery-server:8761/eureka
+      MANAGEMENT_ZIPKIN_TRACING_ENDPOINT: http://zipkin:9411/api/v2/spans
+      MANAGEMENT_TRACING_SAMPLING_PROBABILITY: "1.0"
 
   order-service:
     build:
@@ -77,8 +111,10 @@ services:
       dockerfile: order-service/Dockerfile
     container_name: order-service
     depends_on:
-      - discovery-server
-      - mysql-order
+      discovery-server:
+        condition: service_started
+      mysql-order:
+        condition: service_healthy
     ports:
       - "8081:8081"
     environment:
@@ -87,6 +123,8 @@ services:
       SPRING_DATASOURCE_USERNAME: root
       SPRING_DATASOURCE_PASSWORD: mysql
       EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://discovery-server:8761/eureka
+      MANAGEMENT_ZIPKIN_TRACING_ENDPOINT: http://zipkin:9411/api/v2/spans
+      MANAGEMENT_TRACING_SAMPLING_PROBABILITY: "1.0"
 
   product-service:
     build:
@@ -94,19 +132,22 @@ services:
       dockerfile: product-service/Dockerfile
     container_name: product-service
     depends_on:
-      - discovery-server
-      - mongo
+      discovery-server:
+        condition: service_started
+      mongo:
+        condition: service_healthy
     ports:
-      - "8080:8080"
+      - "8083:8080"
     environment:
       SPRING_APPLICATION_NAME: product-service
       SPRING_DATA_MONGODB_URI: mongodb://mongo:27017/product-service
       EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://discovery-server:8761/eureka
+      MANAGEMENT_ZIPKIN_TRACING_ENDPOINT: http://zipkin:9411/api/v2/spans
+      MANAGEMENT_TRACING_SAMPLING_PROBABILITY: "1.0"
 
 # =====================
 # VOLUMES
 # =====================
-
 volumes:
   mysql_inventory_data:
   mysql_order_data:
